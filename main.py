@@ -10,9 +10,12 @@ BOT_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 
 bot = Bot(token=BOT_TOKEN)
 
+# Simpan berita yang sudah pernah dikirim
+sent_articles = set()
+
 # Fungsi ambil berita terbaru
 def get_news():
-    url = f"https://newsapi.org/v2/everything?q=gold OR XAUUSD&apiKey={API_KEY_NEWS}&pageSize=5"
+    url = f"https://newsapi.org/v2/everything?q=gold OR XAUUSD&apiKey={API_KEY_NEWS}&pageSize=5&sortBy=publishedAt"
     response = requests.get(url)
     data = response.json()
     return data.get("articles", [])
@@ -29,9 +32,12 @@ def analyze_impact(title, description):
     for level, keywords in impact_keywords.items():
         for kw in keywords:
             if kw.lower() in text:
-                if level == "high": score += 3
-                elif level == "medium": score += 2
-                else: score += 1
+                if level == "high":
+                    score += 3
+                elif level == "medium":
+                    score += 2
+                else:
+                    score += 1
     percent = min(int(score / 10 * 100), 100)
     return percent
 
@@ -44,28 +50,35 @@ def recommend_action(percent):
     else:
         return "HOLD"
 
-# Kirim berita ke Telegram
+# Kirim berita ke Telegram (hanya yang baru)
 async def send_news():
+    global sent_articles
     articles = get_news()
     for article in articles:
+        url = article.get("url", "")
         title = article.get("title", "")
         desc = article.get("description", "")
 
+        if not url or url in sent_articles:  # skip jika sudah dikirim
+            continue
+
         # Translate ke bahasa Indonesia
-        title_id = GoogleTranslator(source='auto', target='id').translate(title)
-        desc_id = GoogleTranslator(source='auto', target='id').translate(desc)
+        title_id = GoogleTranslator(source='auto', target='id').translate(title or "")
+        desc_id = GoogleTranslator(source='auto', target='id').translate(desc or "")
 
         percent = analyze_impact(title, desc)
         action = recommend_action(percent)
-        text = f"{title_id}\n{desc_id}\nImpact: {percent}%\nRecommendation: {action}"
+        text = f"{title_id}\n{desc_id}\nImpact: {percent}%\nRecommendation: {action}\n\nSumber: {url}"
+
         await bot.send_message(chat_id=CHAT_ID, text=text)
+        sent_articles.add(url)  # tandai sudah dikirim
         await asyncio.sleep(1)  # delay supaya tidak spam
 
-# Main
+# Main loop (cek terus tiap 30 detik, kirim hanya kalau ada berita baru)
 async def main():
     while True:
         await send_news()
-        await asyncio.sleep(3600)  # cek setiap 1 jam
+        await asyncio.sleep(30)
 
 if __name__ == "__main__":
     asyncio.run(main())
