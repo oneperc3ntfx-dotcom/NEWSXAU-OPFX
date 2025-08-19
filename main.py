@@ -1,73 +1,61 @@
 import asyncio
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from textblob import TextBlob
-import aiohttp
-import time
 
-# --- Konfigurasi ---
-TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
+# Ganti dengan token bot Anda
+TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 CHAT_ID = " -4881339106"
-NEWS_API_URL = "https://api.example.com/news?symbol=XAUUSD"  # Ganti dengan API asli
-INTERVAL = 60 * 60  # 60 menit
 
-# --- Fungsi Analisis Sentimen ---
+# Fungsi untuk analisis berita sederhana
 def analisis_berita(berita_text):
-    blob = TextBlob(berita_text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.1:
+    text = berita_text.lower()
+    if any(word in text for word in ["naik", "bullish", "menguat"]):
         return "BUY"
-    elif polarity < -0.1:
+    elif any(word in text for word in ["turun", "bearish", "melemah"]):
         return "SELL"
     else:
         return "HOLD"
 
-# --- Fungsi Ambil Berita ---
+# Fungsi mengambil berita (contoh)
 async def ambil_berita():
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(NEWS_API_URL) as response:
-                if response.status != 200:
-                    print(f"Error ambil berita: {response.status}")
-                    return []
-                data = await response.json()
-                return data.get("news", [])
-        except Exception as e:
-            print(f"Exception ambil berita: {e}")
-            return []
+    # Simulasi berita
+    return [
+        {"symbol": "XAUUSD", "headline": "Harga emas menguat karena dolar melemah", "impact": "high"},
+        {"symbol": "EURUSD", "headline": "Euro stabil hari ini", "impact": "low"}
+    ]
 
-# --- Fungsi Kirim Berita ke Telegram ---
-async def kirim_berita(bot: Bot, berita_text, high_impact=False):
-    rekomendasi = analisis_berita(berita_text)
-    msg = f"Berita Forex terbaru:\n{berita_text}\n\nRekomendasi: {rekomendasi}"
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
-    if high_impact:
-        print("Dampak tinggi: dikirim langsung!")
+# Fungsi broadcast ke Telegram
+async def broadcast_news(app):
+    try:
+        berita_list = await ambil_berita()
+        for berita in berita_list:
+            rekomendasi = analisis_berita(berita["headline"])
+            msg = f"{berita['symbol']} - {berita['headline']}\nRekomendasi: {rekomendasi}"
+            # Jika dampak tinggi, kirim langsung
+            if berita["impact"] == "high":
+                await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+    except Exception as e:
+        print("Error broadcast:", e)
 
-# --- Scheduler Berita ---
+# Scheduler untuk kirim berita setiap 60 menit
 async def scheduler(app):
     while True:
-        news_list = await ambil_berita()
-        for berita in news_list:
-            text = berita.get("title", "")
-            impact = berita.get("impact", "low")  # contoh: 'high' atau 'low'
-            if impact == "high":
-                await kirim_berita(app.bot, text, high_impact=True)
-            else:
-                # Bisa simpan dulu, dikirim nanti setiap 60 menit
-                await kirim_berita(app.bot, text)
-        await asyncio.sleep(INTERVAL)
+        await broadcast_news(app)
+        await asyncio.sleep(60 * 60)  # 60 menit
 
-# --- Handler /start ---
+# Handler untuk /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot aktif ✅. Siap mengirim berita dan rekomendasi.")
+    await update.message.reply_text("Bot aktif! Siap mengirim berita dan rekomendasi forex.")
 
-# --- Main ---
+# Main
 async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    # Jalankan scheduler di background
+
+    # Jalankan scheduler
     asyncio.create_task(scheduler(app))
+
     await app.run_polling()
 
 if __name__ == "__main__":
