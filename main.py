@@ -1,20 +1,15 @@
-import asyncio
 import requests
 import schedule
-import time
+import asyncio
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# =========================
-# CONFIG
-# =========================
-TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
+TTELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 CHAT_ID = " -4881339106"
-
 NEWS_API_URL = "https://www.forexfactory.com/calendar?json"
 
 # =========================
-# FUNCTION ANALISIS SENTIMEN
+# ANALISIS SENTIMEN
 # =========================
 def analyze_sentiment(news_title):
     bullish_keywords = ["rise", "increase", "strong", "up", "gain"]
@@ -37,7 +32,7 @@ def analyze_sentiment(news_title):
         return "HOLD", 0
 
 # =========================
-# FUNCTION AMBIL BERITA TERBARU
+# AMBIL BERITA
 # =========================
 def get_latest_news():
     try:
@@ -57,7 +52,7 @@ def get_latest_news():
         return [f"Error ambil news: {e}"]
 
 # =========================
-# BROADCAST KE GRUP
+# BROADCAST OTOMATIS
 # =========================
 async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
     messages = get_latest_news()
@@ -78,12 +73,20 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
 
 # =========================
-# SCHEDULER OTOMATIS
+# SCHEDULER BACKGROUND
 # =========================
-def schedule_broadcast(app):
+def run_scheduler(app):
     async def job():
         await broadcast_news(app)
+    
+    async def loop():
+        while True:
+            schedule.run_pending()
+            await asyncio.sleep(10)
+
+    # Schedule setiap 30 menit
     schedule.every(30).minutes.do(lambda: asyncio.create_task(job()))
+    return loop()
 
 # =========================
 # MAIN BOT
@@ -91,19 +94,12 @@ def schedule_broadcast(app):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # Handler
+    # Tambahkan command handler
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("news", news))
-
-    # Jalankan scheduler di background
-    async def run_scheduler():
-        while True:
-            schedule.run_pending()
-            await asyncio.sleep(10)
-
-    # Run bot dan scheduler bersamaan
-    async def main():
-        asyncio.create_task(run_scheduler())
-        await app.run_polling()
-
-    asyncio.run(main())
+    
+    # Jalankan scheduler di background sebelum polling
+    app.create_task(run_scheduler(app))
+    
+    # Jalankan polling (async-safe)
+    app.run_polling()
