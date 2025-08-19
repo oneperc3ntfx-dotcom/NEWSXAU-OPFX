@@ -8,13 +8,12 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 CHAT_ID =  -4881339106  # ganti dengan chat_id grup atau channel
 NEWS_API_KEY = "c09d91931a424c518822f9b4a997e4c5"
-SYMBOL = "XAUUSD"  # simbol forex
-CHECK_INTERVAL = 600  # cek berita setiap 600 detik / 10 menit
+SYMBOL = "XAUUSD"
+CHECK_INTERVAL = 600  # detik
 
-# ===== Fungsi analisis sentimen =====
+# ===== Analisis sentimen =====
 def analyze_sentiment(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
+    polarity = TextBlob(text).sentiment.polarity
     if polarity > 0.1:
         return "BUY"
     elif polarity < -0.1:
@@ -22,7 +21,7 @@ def analyze_sentiment(text):
     else:
         return "NEUTRAL"
 
-# ===== Fungsi ambil berita dari NewsAPI =====
+# ===== Ambil berita =====
 async def fetch_news():
     url = f"https://newsapi.org/v2/everything?q={SYMBOL}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&language=en&pageSize=5"
     news_list = []
@@ -39,16 +38,18 @@ async def fetch_news():
         print("Error ambil news:", e)
     return news_list
 
-# ===== Fungsi kirim berita =====
-async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
-    news_items = await fetch_news()
-    if news_items:
-        for news in news_items:
-            await context.bot.send_message(chat_id=CHAT_ID, text=news)
-    else:
-        await context.bot.send_message(chat_id=CHAT_ID, text="Tidak ada berita baru.")
+# ===== Kirim berita =====
+async def broadcast_news(app):
+    while True:
+        news_items = await fetch_news()
+        if news_items:
+            for news in news_items:
+                await app.bot.send_message(chat_id=CHAT_ID, text=news)
+        else:
+            await app.bot.send_message(chat_id=CHAT_ID, text="Tidak ada berita baru.")
+        await asyncio.sleep(CHECK_INTERVAL)
 
-# ===== Handler start =====
+# ===== /start handler =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
 
@@ -57,8 +58,8 @@ async def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
 
-    # Jalankan scheduler di background
-    app.job_queue.run_repeating(lambda ctx: asyncio.create_task(broadcast_news(ctx)), interval=CHECK_INTERVAL, first=5)
+    # jalankan loop broadcast di background
+    asyncio.create_task(broadcast_news(app))
 
     await app.run_polling()
 
