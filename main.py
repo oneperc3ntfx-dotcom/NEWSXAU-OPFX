@@ -6,10 +6,10 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ===== Konfigurasi =====
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID =  -4881339106  # ganti dengan chat_id grup atau channel
+CHAT_ID =  -4881339106
 NEWS_API_KEY = "c09d91931a424c518822f9b4a997e4c5"
 SYMBOL = "XAUUSD"
-CHECK_INTERVAL = 600  # detik
+CHECK_INTERVAL = 600  # 10 menit
 
 # ===== Analisis sentimen =====
 def analyze_sentiment(text):
@@ -33,35 +33,36 @@ async def fetch_news():
                     title = article["title"]
                     link = article["url"]
                     recommendation = analyze_sentiment(title)
-                    news_list.append(f"{title}\nRekomendasi: {recommendation}\n{link}")
+                    news_list.append({"title": title, "link": link, "recommendation": recommendation})
     except Exception as e:
         print("Error ambil news:", e)
     return news_list
 
 # ===== Kirim berita =====
 async def broadcast_news(app):
+    sent_links = set()  # menyimpan link berita yang sudah dikirim
     while True:
         news_items = await fetch_news()
-        if news_items:
-            for news in news_items:
-                await app.bot.send_message(chat_id=CHAT_ID, text=news)
+        new_items = [n for n in news_items if n["link"] not in sent_links]
+        if new_items:
+            for news in new_items:
+                text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
+                await app.bot.send_message(chat_id=CHAT_ID, text=text)
+                sent_links.add(news["link"])
         else:
-            await app.bot.send_message(chat_id=CHAT_ID, text="Tidak ada berita baru.")
+            print("Tidak ada berita baru.")
         await asyncio.sleep(CHECK_INTERVAL)
 
 # ===== /start handler =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
 
-# ===== Main =====
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
+# ===== Setup Bot =====
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
 
-    # jalankan loop broadcast di background
-    asyncio.create_task(broadcast_news(app))
+# jalankan loop broadcast di background
+asyncio.create_task(broadcast_news(app))
 
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# jalankan bot polling
+app.run_polling()
