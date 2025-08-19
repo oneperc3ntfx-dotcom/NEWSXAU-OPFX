@@ -1,61 +1,73 @@
 import asyncio
-import requests
-from telegram import Bot
-from telegram.ext import ApplicationBuilder
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from textblob import TextBlob
+import aiohttp
+import time
 
-# ====== CONFIG ======
-TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID =  -4881339106  # ganti dengan ID grup Telegram
-NEWS_API_URL = "https://api.example.com/news?symbol=XAUUSD"
-HIGH_IMPACT = ["High"]  # level dampak yang dianggap tinggi
+# --- Konfigurasi ---
+TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
+CHAT_ID = " -4881339106"
+NEWS_API_URL = "https://api.example.com/news?symbol=XAUUSD"  # Ganti dengan API asli
+INTERVAL = 60 * 60  # 60 menit
 
-# ====== INISIALISASI BOT ======
-bot = Bot(token=TELEGRAM_TOKEN)
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+# --- Fungsi Analisis Sentimen ---
+def analisis_berita(berita_text):
+    blob = TextBlob(berita_text)
+    polarity = blob.sentiment.polarity
+    if polarity > 0.1:
+        return "BUY"
+    elif polarity < -0.1:
+        return "SELL"
+    else:
+        return "HOLD"
 
-# ====== FUNCTION AMBIL NEWS ======
-def get_news():
-    try:
-        response = requests.get(NEWS_API_URL, timeout=10)
-        if response.status_code != 200 or not response.text:
-            print("Error ambil news:", response.status_code, response.text)
+# --- Fungsi Ambil Berita ---
+async def ambil_berita():
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(NEWS_API_URL) as response:
+                if response.status != 200:
+                    print(f"Error ambil berita: {response.status}")
+                    return []
+                data = await response.json()
+                return data.get("news", [])
+        except Exception as e:
+            print(f"Exception ambil berita: {e}")
             return []
-        data = response.json()
-        return data.get("news", [])
-    except Exception as e:
-        print("Exception ambil news:", e)
-        return []
 
-# ====== FUNCTION BROADCAST ======
-async def broadcast_news():
-    news_list = get_news()
-    for news in news_list:
-        impact = news.get("impact", "")
-        msg = f"📰 {news.get('title', 'No Title')}\n📅 {news.get('date', '')}\nImpact: {impact}\n{news.get('link', '')}"
-        try:
-            await bot.send_message(chat_id=CHAT_ID, text=msg)
-        except Exception as e:
-            print("Error kirim ke Telegram:", e)
-        # Kirim langsung jika high impact
-        if impact in HIGH_IMPACT:
-            print("High impact news dikirim langsung!")
+# --- Fungsi Kirim Berita ke Telegram ---
+async def kirim_berita(bot: Bot, berita_text, high_impact=False):
+    rekomendasi = analisis_berita(berita_text)
+    msg = f"Berita Forex terbaru:\n{berita_text}\n\nRekomendasi: {rekomendasi}"
+    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    if high_impact:
+        print("Dampak tinggi: dikirim langsung!")
 
-# ====== SCHEDULER ======
-async def scheduler():
+# --- Scheduler Berita ---
+async def scheduler(app):
     while True:
-        try:
-            print("Cek berita XAUUSD...")
-            await broadcast_news()
-        except Exception as e:
-            print("Error scheduler:", e)
-        # Tunggu 60 menit
-        await asyncio.sleep(3600)
+        news_list = await ambil_berita()
+        for berita in news_list:
+            text = berita.get("title", "")
+            impact = berita.get("impact", "low")  # contoh: 'high' atau 'low'
+            if impact == "high":
+                await kirim_berita(app.bot, text, high_impact=True)
+            else:
+                # Bisa simpan dulu, dikirim nanti setiap 60 menit
+                await kirim_berita(app.bot, text)
+        await asyncio.sleep(INTERVAL)
 
-# ====== START BOT ======
+# --- Handler /start ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot aktif ✅. Siap mengirim berita dan rekomendasi.")
+
+# --- Main ---
 async def main():
-    # Jalankan scheduler
-    asyncio.create_task(scheduler())
-    # Jalankan bot polling (untuk menerima perintah jika diperlukan)
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    # Jalankan scheduler di background
+    asyncio.create_task(scheduler(app))
     await app.run_polling()
 
 if __name__ == "__main__":
