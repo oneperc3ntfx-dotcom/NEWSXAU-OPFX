@@ -1,65 +1,65 @@
-import aiohttp
 import asyncio
-from textblob import TextBlob
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import requests
+from telegram import Bot
+from telegram.error import TelegramError
 
-TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID =  -4881339106
-NEWS_API_KEY = "c09d91931a424c518822f9b4a997e4c5"
-SYMBOL = "XAUUSD"
-CHECK_INTERVAL = 600  # 10 menit
+# TOKEN & chat_id grup
+TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
+CHAT_ID = "-4881339106"  # contoh: -1001234567890
+bot = Bot(token=TOKEN)
 
-def analyze_sentiment(text):
-    polarity = TextBlob(text).sentiment.polarity
-    if polarity > 0.1:
-        return "BUY"
-    elif polarity < -0.1:
-        return "SELL"
-    else:
-        return "NEUTRAL"
+CHECK_INTERVAL = 300  # detik (5 menit)
 
-async def fetch_news():
-    url = f"https://newsapi.org/v2/everything?q={SYMBOL}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&language=en&pageSize=5"
-    news_list = []
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                for article in data.get("articles", []):
-                    title = article["title"]
-                    link = article["url"]
-                    recommendation = analyze_sentiment(title)
-                    news_list.append({"title": title, "link": link, "recommendation": recommendation})
-    except Exception as e:
-        print("Error ambil news:", e)
-    return news_list
+# Ambil berita ekonomi XAU/USD dari API (dummy)
+def get_news():
+    berita = [
+        {"judul": "Inflasi AS naik", "dampak": "high", "pair": "XAU/USD"},
+        {"judul": "Federal Reserve Rate Decision", "dampak": "medium", "pair": "XAU/USD"},
+    ]
+    return berita
 
-async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
-    if "sent_links" not in context.bot_data:
-        context.bot_data["sent_links"] = set()
+# Tentukan rekomendasi buy/sell berdasar berita
+def rekomendasi(berita):
+    hasil = []
+    for item in berita:
+        dampak = item["dampak"]
+        # Konversi dampak ke presentase
+        if dampak == "high":
+            persen = 80
+        elif dampak == "medium":
+            persen = 50
+        else:
+            persen = 20
+        
+        # Rekomendasi sederhana
+        if "inflasi" in item["judul"].lower() or "rate" in item["judul"].lower():
+            action = "BUY" if "inflasi" in item["judul"].lower() else "SELL"
+        else:
+            action = "HOLD"
+        
+        hasil.append({
+            "judul": item["judul"],
+            "action": action,
+            "persen": persen
+        })
+    return hasil
 
-    news_items = await fetch_news()
-    new_items = [n for n in news_items if n["link"] not in context.bot_data["sent_links"]]
+# Kirim pesan ke Telegram
+def kirim_ke_telegram(rekom):
+    for item in rekom:
+        text = f"📰 Berita: {item['judul']}\n💹 Rekomendasi: {item['action']}\n📊 Dampak: {item['persen']}%"
+        try:
+            bot.send_message(chat_id=CHAT_ID, text=text)
+        except TelegramError as e:
+            print("Error mengirim pesan:", e)
 
-    for news in new_items:
-        text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
-        await context.bot.send_message(chat_id=CHAT_ID, text=text)
-        context.bot_data["sent_links"].add(news["link"])
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
-
-# ===== MAIN =====
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    
-    # Jalankan broadcast_news setiap interval
-    app.job_queue.run_repeating(broadcast_news, interval=CHECK_INTERVAL, first=5)
-
-    await app.run_polling()
+# Looping asynchronous untuk update otomatis
+async def main_loop():
+    while True:
+        berita = get_news()
+        rekom = rekomendasi(berita)
+        kirim_ke_telegram(rekom)
+        await asyncio.sleep(CHECK_INTERVAL)  # tunggu 5 menit
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    asyncio.run(main_loop())
