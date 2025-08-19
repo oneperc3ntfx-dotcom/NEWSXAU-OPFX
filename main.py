@@ -1,12 +1,21 @@
+import asyncio
 import requests
-from telegram import Bot
+import schedule
+import time
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackContext
 
+# =========================
+# CONFIG
+# =========================
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 CHAT_ID = " -4881339106"
 
-bot = Bot(token=TELEGRAM_TOKEN)
 NEWS_API_URL = "https://www.forexfactory.com/calendar?json"
 
+# =========================
+# FUNCTION ANALISIS SENTIMEN
+# =========================
 def analyze_sentiment(news_title):
     bullish_keywords = ["rise", "increase", "strong", "up", "gain"]
     bearish_keywords = ["fall", "drop", "weak", "down", "loss"]
@@ -27,6 +36,9 @@ def analyze_sentiment(news_title):
     else:
         return "HOLD", 0
 
+# =========================
+# FUNCTION AMBIL BERITA TERBARU
+# =========================
 def get_latest_news():
     try:
         response = requests.get(NEWS_API_URL)
@@ -44,7 +56,54 @@ def get_latest_news():
     except Exception as e:
         return [f"Error ambil news: {e}"]
 
-# Kirim berita ke grup
-messages = get_latest_news()
-for msg in messages:
-    bot.send_message(chat_id=CHAT_ID, text=msg)
+# =========================
+# BROADCAST KE GRUP
+# =========================
+async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
+    messages = get_latest_news()
+    for msg in messages:
+        await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# =========================
+# COMMAND HANDLER
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Halo! Saya bot XAU/USD. Ketik /news untuk mendapatkan update berita terbaru emas."
+    )
+
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    messages = get_latest_news()
+    for msg in messages:
+        await update.message.reply_text(msg)
+
+# =========================
+# SCHEDULER OTOMATIS
+# =========================
+def schedule_broadcast(app):
+    async def job():
+        await broadcast_news(app)
+    schedule.every(30).minutes.do(lambda: asyncio.create_task(job()))
+
+# =========================
+# MAIN BOT
+# =========================
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # Handler
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("news", news))
+
+    # Jalankan scheduler di background
+    async def run_scheduler():
+        while True:
+            schedule.run_pending()
+            await asyncio.sleep(10)
+
+    # Run bot dan scheduler bersamaan
+    async def main():
+        asyncio.create_task(run_scheduler())
+        await app.run_polling()
+
+    asyncio.run(main())
