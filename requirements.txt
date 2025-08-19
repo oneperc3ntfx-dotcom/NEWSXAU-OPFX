@@ -1,3 +1,2 @@
-python-telegram-bot[job-queue]==20.5
-aiohttp
-textblob
+python-telegram-bot==20.3
+requests
