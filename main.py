@@ -1,16 +1,16 @@
 import aiohttp
-import asyncio
 from textblob import TextBlob
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
 
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 CHAT_ID =  -4881339106
 NEWS_API_KEY = "c09d91931a424c518822f9b4a997e4c5"
 SYMBOL = "XAUUSD"
-CHECK_INTERVAL = 600  # 10 menit
+CHECK_INTERVAL = 600  # detik (10 menit)
 
-def analyze_sentiment(text):
+# ===== Fungsi Sentiment =====
+def analyze_sentiment(text: str) -> str:
     polarity = TextBlob(text).sentiment.polarity
     if polarity > 0.1:
         return "BUY"
@@ -19,6 +19,7 @@ def analyze_sentiment(text):
     else:
         return "NEUTRAL"
 
+# ===== Fungsi Ambil Berita =====
 async def fetch_news():
     url = f"https://newsapi.org/v2/everything?q={SYMBOL}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&language=en&pageSize=5"
     news_list = []
@@ -35,38 +36,32 @@ async def fetch_news():
         print("Error ambil news:", e)
     return news_list
 
-async def broadcast_news(app):
-    """Loop untuk mengirim berita berkala."""
-    sent_links = set()
-    while True:
-        news_items = await fetch_news()
-        new_items = [n for n in news_items if n["link"] not in sent_links]
+# ===== Fungsi Broadcast =====
+async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
+    if "sent_links" not in context.bot_data:
+        context.bot_data["sent_links"] = set()
 
-        if new_items:
-            for news in new_items:
-                text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
-                try:
-                    await app.bot.send_message(chat_id=CHAT_ID, text=text)
-                    sent_links.add(news["link"])
-                except Exception as e:
-                    print("Gagal kirim pesan:", e)
-        else:
-            print("Tidak ada berita baru.")
+    news_items = await fetch_news()
+    new_items = [n for n in news_items if n["link"] not in context.bot_data["sent_links"]]
 
-        await asyncio.sleep(CHECK_INTERVAL)
+    if new_items:
+        for news in new_items:
+            text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
+            await context.bot.send_message(chat_id=CHAT_ID, text=text)
+            context.bot_data["sent_links"].add(news["link"])
+    else:
+        print("Tidak ada berita baru.")
 
+# ===== Handler /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
 
-async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
+# ===== Setup Bot =====
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
 
-    # Jalankan loop broadcast_news sebagai background task
-    asyncio.create_task(broadcast_news(app))
+# ===== JobQueue =====
+app.job_queue.run_repeating(broadcast_news, interval=CHECK_INTERVAL, first=5)
 
-    # Jalankan polling bot
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# ===== Jalankan Bot =====
+app.run_polling()
