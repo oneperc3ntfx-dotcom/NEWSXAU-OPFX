@@ -1,65 +1,66 @@
 import asyncio
 import requests
 from telegram import Bot
-from telegram.error import TelegramError
 
-# TOKEN & chat_id grup
-TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID = "-4881339106"  # contoh: -1001234567890
-bot = Bot(token=TOKEN)
+# --- CONFIG ---
+API_KEY_NEWS = "c09d91931a424c518822f9b4a997e4c5"
+CHAT_ID = "-4881339106"
+BOT_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 
-CHECK_INTERVAL = 300  # detik (5 menit)
+bot = Bot(token=BOT_TOKEN)
 
-# Ambil berita ekonomi XAU/USD dari API (dummy)
+# Fungsi ambil berita terbaru
 def get_news():
-    berita = [
-        {"judul": "Inflasi AS naik", "dampak": "high", "pair": "XAU/USD"},
-        {"judul": "Federal Reserve Rate Decision", "dampak": "medium", "pair": "XAU/USD"},
-    ]
-    return berita
+    url = f"https://newsapi.org/v2/everything?q=gold OR XAUUSD&apiKey={API_KEY_NEWS}&pageSize=5"
+    response = requests.get(url)
+    data = response.json()
+    return data.get("articles", [])
 
-# Tentukan rekomendasi buy/sell berdasar berita
-def rekomendasi(berita):
-    hasil = []
-    for item in berita:
-        dampak = item["dampak"]
-        # Konversi dampak ke presentase
-        if dampak == "high":
-            persen = 80
-        elif dampak == "medium":
-            persen = 50
-        else:
-            persen = 20
-        
-        # Rekomendasi sederhana
-        if "inflasi" in item["judul"].lower() or "rate" in item["judul"].lower():
-            action = "BUY" if "inflasi" in item["judul"].lower() else "SELL"
-        else:
-            action = "HOLD"
-        
-        hasil.append({
-            "judul": item["judul"],
-            "action": action,
-            "persen": persen
-        })
-    return hasil
+# Analisis dampak berita ke XAU/USD
+def analyze_impact(title, description):
+    impact_keywords = {
+        "high": ["inflation", "interest rate", "federal reserve", "gold rally"],
+        "medium": ["GDP", "unemployment", "economic growth"],
+        "low": ["general news", "market update"]
+    }
+    score = 0
+    text = f"{title} {description}".lower()
+    for level, keywords in impact_keywords.items():
+        for kw in keywords:
+            if kw.lower() in text:
+                if level == "high": score += 3
+                elif level == "medium": score += 2
+                else: score += 1
+    # Hitung persentase impact (maks 10)
+    percent = min(int(score / 10 * 100), 100)
+    return percent
 
-# Kirim pesan ke Telegram
-def kirim_ke_telegram(rekom):
-    for item in rekom:
-        text = f"📰 Berita: {item['judul']}\n💹 Rekomendasi: {item['action']}\n📊 Dampak: {item['persen']}%"
-        try:
-            bot.send_message(chat_id=CHAT_ID, text=text)
-        except TelegramError as e:
-            print("Error mengirim pesan:", e)
+# Tentukan rekomendasi buy/sell
+def recommend_action(percent):
+    if percent >= 60:
+        return "SELL"
+    elif percent >= 30:
+        return "BUY"
+    else:
+        return "HOLD"
 
-# Looping asynchronous untuk update otomatis
-async def main_loop():
+# Kirim berita ke Telegram
+async def send_news():
+    articles = get_news()
+    for article in articles:
+        title = article.get("title", "")
+        desc = article.get("description", "")
+        percent = analyze_impact(title, desc)
+        action = recommend_action(percent)
+        text = f"{title}\n{desc}\nImpact: {percent}%\nRecommendation: {action}"
+        await bot.send_message(chat_id=CHAT_ID, text=text)
+        await asyncio.sleep(1)  # delay supaya tidak spam
+
+# Main
+async def main():
     while True:
-        berita = get_news()
-        rekom = rekomendasi(berita)
-        kirim_ke_telegram(rekom)
-        await asyncio.sleep(CHECK_INTERVAL)  # tunggu 5 menit
+        await send_news()
+        await asyncio.sleep(3600)  # cek setiap 1 jam
 
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    asyncio.run(main())
