@@ -1,87 +1,62 @@
-import requests
 import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import requests
+from telegram import Bot
+from telegram.ext import ApplicationBuilder
 
+# ====== CONFIG ======
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID =  -4881339106
-NEWS_API_URL = "https://www.forexfactory.com/calendar?json"
+CHAT_ID =  -4881339106  # ganti dengan ID grup Telegram
+NEWS_API_URL = "https://api.example.com/news?symbol=XAUUSD"
+HIGH_IMPACT = ["High"]  # level dampak yang dianggap tinggi
 
-last_sent_news = set()
+# ====== INISIALISASI BOT ======
+bot = Bot(token=TELEGRAM_TOKEN)
+app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-def analyze_sentiment(news_title):
-    bullish_keywords = ["rise", "increase", "strong", "up", "gain"]
-    bearish_keywords = ["fall", "drop", "weak", "down", "loss"]
-    title_lower = news_title.lower()
-    score = 0
-    for word in bullish_keywords:
-        if word in title_lower:
-            score += 1
-    for word in bearish_keywords:
-        if word in title_lower:
-            score -= 1
-    if score > 0:
-        return "BUY", min(score*20, 100)
-    elif score < 0:
-        return "SELL", min(abs(score)*20, 100)
-    else:
-        return "HOLD", 0
-
-def get_latest_news():
+# ====== FUNCTION AMBIL NEWS ======
+def get_news():
     try:
-        response = requests.get(NEWS_API_URL)
+        response = requests.get(NEWS_API_URL, timeout=10)
+        if response.status_code != 200 or not response.text:
+            print("Error ambil news:", response.status_code, response.text)
+            return []
         data = response.json()
-        news_list = data.get("events", [])[:10]
-        xau_news = [n for n in news_list if "gold" in n.get("currency", "").lower() or "xau" in n.get("currency", "").lower()]
-        messages = []
-        for news in xau_news:
-            news_id = news.get("id") or news.get("title")
-            if news_id in last_sent_news:
-                continue
-            title = news.get("title", "No title")
-            impact = news.get("impact", "Medium")
-            recommendation, perc = analyze_sentiment(title)
-            msg = f"📰 {title}\nImpact: {impact}\nRecommendation: {recommendation} ({perc}%)"
-            messages.append((msg, impact))
-            last_sent_news.add(news_id)
-        return messages
+        return data.get("news", [])
     except Exception as e:
-        return [(f"Error ambil news: {e}", "Medium")]
+        print("Exception ambil news:", e)
+        return []
 
-async def broadcast_news(app):
-    news_list = get_latest_news()
-    for msg, _ in news_list:
-        await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+# ====== FUNCTION BROADCAST ======
+async def broadcast_news():
+    news_list = get_news()
+    for news in news_list:
+        impact = news.get("impact", "")
+        msg = f"📰 {news.get('title', 'No Title')}\n📅 {news.get('date', '')}\nImpact: {impact}\n{news.get('link', '')}"
+        try:
+            await bot.send_message(chat_id=CHAT_ID, text=msg)
+        except Exception as e:
+            print("Error kirim ke Telegram:", e)
+        # Kirim langsung jika high impact
+        if impact in HIGH_IMPACT:
+            print("High impact news dikirim langsung!")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Halo! Saya bot XAU/USD. Ketik /news untuk mendapatkan update berita terbaru emas."
-    )
-
-async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    news_list = get_latest_news()
-    if not news_list:
-        await update.message.reply_text("Tidak ada berita XAU/USD terbaru.")
-    for msg, _ in news_list:
-        await update.message.reply_text(msg)
-
-# Scheduler
-async def scheduler(app: "Application"):
+# ====== SCHEDULER ======
+async def scheduler():
     while True:
-        news_list = get_latest_news()
-        for msg, impact in news_list:
-            if impact.lower() == "high":
-                await app.bot.send_message(chat_id=CHAT_ID, text=msg)
-        # Kirim semua berita setiap 60 menit
-        await broadcast_news(app)
+        try:
+            print("Cek berita XAUUSD...")
+            await broadcast_news()
+        except Exception as e:
+            print("Error scheduler:", e)
+        # Tunggu 60 menit
         await asyncio.sleep(3600)
 
-async def post_init(app: "Application"):
-    # Jalankan scheduler setelah bot siap
-    asyncio.create_task(scheduler(app))
+# ====== START BOT ======
+async def main():
+    # Jalankan scheduler
+    asyncio.create_task(scheduler())
+    # Jalankan bot polling (untuk menerima perintah jika diperlukan)
+    await app.run_polling()
 
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("news", news))
-    app.run_polling()
+    asyncio.run(main())
