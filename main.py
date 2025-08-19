@@ -1,7 +1,7 @@
 import asyncio
 import requests
 from telegram import Bot
-from googletrans import Translator  # <- import Translator
+from deep_translator import GoogleTranslator
 
 # --- CONFIG ---
 API_KEY_NEWS = "c09d91931a424c518822f9b4a997e4c5"
@@ -9,7 +9,6 @@ CHAT_ID = "-1002510797113"
 BOT_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
 
 bot = Bot(token=BOT_TOKEN)
-translator = Translator()  # <- buat object translator
 
 # Fungsi ambil berita terbaru
 def get_news():
@@ -33,7 +32,6 @@ def analyze_impact(title, description):
                 if level == "high": score += 3
                 elif level == "medium": score += 2
                 else: score += 1
-    # Hitung persentase impact (maks 10)
     percent = min(int(score / 10 * 100), 100)
     return percent
 
@@ -46,28 +44,20 @@ def recommend_action(percent):
     else:
         return "HOLD"
 
-# Fungsi translate ke bahasa Indonesia
-def translate_to_id(text):
-    try:
-        result = translator.translate(text, dest='id')
-        return result.text
-    except:
-        return text  # fallback jika gagal
-
 # Kirim berita ke Telegram
 async def send_news():
     articles = get_news()
     for article in articles:
         title = article.get("title", "")
         desc = article.get("description", "")
-        
-        # translate
-        title_id = translate_to_id(title)
-        desc_id = translate_to_id(desc)
-        
+
+        # Translate ke bahasa Indonesia
+        title_id = GoogleTranslator(source='auto', target='id').translate(title)
+        desc_id = GoogleTranslator(source='auto', target='id').translate(desc)
+
         percent = analyze_impact(title, desc)
         action = recommend_action(percent)
-        text = f"{title_id}\n{desc_id}\nDampak: {percent}%\nRekomendasi: {action}"
+        text = f"{title_id}\n{desc_id}\nImpact: {percent}%\nRecommendation: {action}"
         await bot.send_message(chat_id=CHAT_ID, text=text)
         await asyncio.sleep(1)  # delay supaya tidak spam
 
