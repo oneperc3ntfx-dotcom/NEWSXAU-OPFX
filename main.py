@@ -35,32 +35,38 @@ async def fetch_news():
         print("Error ambil news:", e)
     return news_list
 
-async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
-    # menyimpan berita yang sudah dikirim
-    if "sent_links" not in context.bot_data:
-        context.bot_data["sent_links"] = set()
+async def broadcast_news(app):
+    """Loop untuk mengirim berita berkala."""
+    sent_links = set()
+    while True:
+        news_items = await fetch_news()
+        new_items = [n for n in news_items if n["link"] not in sent_links]
 
-    news_items = await fetch_news()
-    new_items = [n for n in news_items if n["link"] not in context.bot_data["sent_links"]]
+        if new_items:
+            for news in new_items:
+                text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
+                try:
+                    await app.bot.send_message(chat_id=CHAT_ID, text=text)
+                    sent_links.add(news["link"])
+                except Exception as e:
+                    print("Gagal kirim pesan:", e)
+        else:
+            print("Tidak ada berita baru.")
 
-    if new_items:
-        for news in new_items:
-            text = f"{news['title']}\nRekomendasi: {news['recommendation']}\n{news['link']}"
-            await context.bot.send_message(chat_id=CHAT_ID, text=text)
-            context.bot_data["sent_links"].add(news["link"])
-    else:
-        print("Tidak ada berita baru.")
+        await asyncio.sleep(CHECK_INTERVAL)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
 
-# ===== SETUP BOT =====
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
 
-# ===== Job Queue =====
-# Jalankan broadcast_news setiap CHECK_INTERVAL detik
-app.job_queue.run_repeating(broadcast_news, interval=CHECK_INTERVAL, first=5)
+    # Jalankan loop broadcast_news sebagai background task
+    asyncio.create_task(broadcast_news(app))
 
-# ===== RUN BOT =====
-app.run_polling()
+    # Jalankan polling bot
+    await app.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
