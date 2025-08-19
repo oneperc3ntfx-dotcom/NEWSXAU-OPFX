@@ -4,27 +4,15 @@ from textblob import TextBlob
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# ===== Konfigurasi =====
 TELEGRAM_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
-CHAT_ID = " -4881339106"  # opsional jika ingin broadcast
+CHAT_ID =  -4881339106  # ganti dengan chat_id grup atau channel
+NEWS_API_KEY = "c09d91931a424c518822f9b4a997e4c5"
+SYMBOL = "XAUUSD"  # simbol forex
+CHECK_INTERVAL = 600  # cek berita setiap 600 detik / 10 menit
 
-NEWS_API_URL = "https://api.example.com/news?symbol=XAUUSD"
-
-# Fungsi untuk ambil berita
-async def fetch_news():
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(NEWS_API_URL) as resp:
-                data = await resp.json()
-                # contoh asumsi data['articles'] list berita
-                if data.get("articles"):
-                    return data["articles"][0]["title"]
-                return None
-        except Exception as e:
-            print("Exception ambil news:", e)
-            return None
-
-# Analisis sentimen sederhana untuk rekomendasi
-def analyze_sentiment(text: str) -> str:
+# ===== Fungsi analisis sentimen =====
+def analyze_sentiment(text):
     blob = TextBlob(text)
     polarity = blob.sentiment.polarity
     if polarity > 0.1:
@@ -32,35 +20,47 @@ def analyze_sentiment(text: str) -> str:
     elif polarity < -0.1:
         return "SELL"
     else:
-        return "HOLD"
+        return "NEUTRAL"
 
-# Scheduler untuk broadcast berita + rekomendasi
-async def scheduler(app):
-    while True:
-        news = await fetch_news()
-        if news:
-            recommendation = analyze_sentiment(news)
-            msg = f"Berita XAUUSD:\n{news}\nRekomendasi: {recommendation}"
-            try:
-                await app.bot.send_message(chat_id=CHAT_ID, text=msg)
-            except Exception as e:
-                print("Error kirim pesan:", e)
-        else:
-            print("Tidak ada berita baru.")
-        await asyncio.sleep(60 * 60)  # 60 menit
+# ===== Fungsi ambil berita dari NewsAPI =====
+async def fetch_news():
+    url = f"https://newsapi.org/v2/everything?q={SYMBOL}&sortBy=publishedAt&apiKey={NEWS_API_KEY}&language=en&pageSize=5"
+    news_list = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                for article in data.get("articles", []):
+                    title = article["title"]
+                    link = article["url"]
+                    recommendation = analyze_sentiment(title)
+                    news_list.append(f"{title}\nRekomendasi: {recommendation}\n{link}")
+    except Exception as e:
+        print("Error ambil news:", e)
+    return news_list
 
-# Handler /start
+# ===== Fungsi kirim berita =====
+async def broadcast_news(context: ContextTypes.DEFAULT_TYPE):
+    news_items = await fetch_news()
+    if news_items:
+        for news in news_items:
+            await context.bot.send_message(chat_id=CHAT_ID, text=news)
+    else:
+        await context.bot.send_message(chat_id=CHAT_ID, text="Tidak ada berita baru.")
+
+# ===== Handler start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot aktif!")
+    await update.message.reply_text("Bot aktif! Akan mengirim berita forex beserta rekomendasi buy/sell.")
 
-# Fungsi post_init untuk jalankan scheduler
-async def on_startup(app):
-    asyncio.create_task(scheduler(app))
+# ===== Main =====
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
 
-# Build aplikasi Telegram
-app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.post_init = on_startup
+    # Jalankan scheduler di background
+    app.job_queue.run_repeating(lambda ctx: asyncio.create_task(broadcast_news(ctx)), interval=CHECK_INTERVAL, first=5)
+
+    await app.run_polling()
 
 if __name__ == "__main__":
-    app.run_polling()
+    asyncio.run(main())
