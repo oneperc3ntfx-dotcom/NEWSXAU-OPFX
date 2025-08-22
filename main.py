@@ -25,7 +25,7 @@ def analyze_impact(title, description):
     impact_keywords = {
         "high": ["inflation", "interest rate", "federal reserve", "gold rally"],
         "medium": ["GDP", "unemployment", "economic growth"],
-        "low": ["general news", "market update"]
+        "low": ["market update", "commodity", "dollar"]
     }
     score = 0
     text = f"{title} {description}".lower()
@@ -50,7 +50,7 @@ def recommend_action(percent):
     else:
         return "HOLD"
 
-# Kirim berita ke Telegram (hanya yang baru)
+# Kirim berita ke Telegram (hanya yang relevan)
 async def send_news():
     global sent_articles
     articles = get_news()
@@ -62,11 +62,16 @@ async def send_news():
         if not url or url in sent_articles:  # skip jika sudah dikirim
             continue
 
+        percent = analyze_impact(title, desc)
+
+        # ⛔ Filter: hanya kirim kalau impact > 0
+        if percent == 0:
+            continue
+
         # Translate ke bahasa Indonesia
         title_id = GoogleTranslator(source='auto', target='id').translate(title or "")
         desc_id = GoogleTranslator(source='auto', target='id').translate(desc or "")
 
-        percent = analyze_impact(title, desc)
         action = recommend_action(percent)
         text = f"{title_id}\n{desc_id}\nImpact: {percent}%\nRecommendation: {action}\n\nSumber: {url}"
 
@@ -74,7 +79,7 @@ async def send_news():
         sent_articles.add(url)  # tandai sudah dikirim
         await asyncio.sleep(1)  # delay supaya tidak spam
 
-# Main loop (cek terus tiap 30 detik, kirim hanya kalau ada berita baru)
+# Main loop (cek terus tiap 30 detik, kirim hanya kalau ada berita baru & relevan)
 async def main():
     while True:
         await send_news()
