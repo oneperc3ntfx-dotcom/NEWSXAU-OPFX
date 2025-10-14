@@ -1,47 +1,64 @@
+#!/usr/bin/env python3
+import os
 import asyncio
 import requests
 from telegram import Bot
 from deep_translator import GoogleTranslator
+from datetime import datetime
+import pytz
 
-# --- CONFIG ---
-API_KEY_NEWS = "c09d91931a424c518822f9b4a997e4c5"
-CHAT_ID = "-1002631457012"
-BOT_TOKEN = "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY"
+# =======================
+# CONFIG
+# =======================
+API_KEY_NEWS = os.getenv("API_KEY_NEWS", "c09d91931a424c518822f9b4a997e4c5")
+CHAT_ID = os.getenv("CHAT_ID", "-1002631457012")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY")
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))  # detik
+TZ = pytz.timezone("Asia/Jakarta")
 
 bot = Bot(token=BOT_TOKEN)
-
-# Simpan berita yang sudah pernah dikirim
 sent_articles = set()
 
-# Fungsi ambil berita terbaru
+# =======================
+# Ambil berita terbaru
+# =======================
 def get_news():
-    url = f"https://newsapi.org/v2/everything?q=gold OR XAUUSD&apiKey={API_KEY_NEWS}&pageSize=5&sortBy=publishedAt"
-    response = requests.get(url)
-    data = response.json()
-    return data.get("articles", [])
+    try:
+        url = (
+            f"https://newsapi.org/v2/everything?"
+            f"q=gold OR XAUUSD&apiKey={API_KEY_NEWS}&pageSize=5&sortBy=publishedAt&language=en"
+        )
+        response = requests.get(url, timeout=15)
+        data = response.json()
+        return data.get("articles", [])
+    except Exception as e:
+        print("⚠️ Gagal mengambil berita:", e)
+        return []
 
-# Analisis dampak berita ke XAU/USD
+# =======================
+# Analisis dampak berita
+# =======================
 def analyze_impact(title, description):
     impact_keywords = {
-        "high": ["inflation", "interest rate", "federal reserve", "gold rally"],
+        "high": ["inflation", "interest rate", "federal reserve", "gold rally", "usd strengthens"],
         "medium": ["GDP", "unemployment", "economic growth"],
         "low": ["market update", "commodity", "dollar"]
     }
+
     score = 0
     text = f"{title} {description}".lower()
+
     for level, keywords in impact_keywords.items():
         for kw in keywords:
-            if kw.lower() in text:
-                if level == "high":
-                    score += 3
-                elif level == "medium":
-                    score += 2
-                else:
-                    score += 1
+            if kw in text:
+                score += {"high": 3, "medium": 2, "low": 1}[level]
+
     percent = min(int(score / 10 * 100), 100)
     return percent
 
-# Tentukan rekomendasi buy/sell
+# =======================
+# Rekomendasi buy/sell
+# =======================
 def recommend_action(percent):
     if percent >= 60:
         return "SELL"
@@ -50,40 +67,67 @@ def recommend_action(percent):
     else:
         return "HOLD"
 
-# Kirim berita ke Telegram (hanya yang relevan)
+# =======================
+# Kirim berita ke Telegram
+# =======================
 async def send_news():
     global sent_articles
     articles = get_news()
+
+    if not articles:
+        print("ℹ️ Tidak ada berita baru ditemukan.")
+        return
+
     for article in articles:
         url = article.get("url", "")
         title = article.get("title", "")
         desc = article.get("description", "")
 
-        if not url or url in sent_articles:  # skip jika sudah dikirim
+        if not url or url in sent_articles:
             continue
 
         percent = analyze_impact(title, desc)
-
-        # ⛔ Filter: hanya kirim kalau impact > 0
         if percent == 0:
             continue
 
-        # Translate ke bahasa Indonesia
-        title_id = GoogleTranslator(source='auto', target='id').translate(title or "")
-        desc_id = GoogleTranslator(source='auto', target='id').translate(desc or "")
+        try:
+            title_id = GoogleTranslator(source="auto", target="id").translate(title or "")
+            desc_id = GoogleTranslator(source="auto", target="id").translate(desc or "")
+        except Exception:
+            title_id, desc_id = title, desc
 
         action = recommend_action(percent)
-        text = f"{title_id}\n{desc_id}\nImpact: {percent}%\nRecommendation: {action}\n\nSumber: {url}"
+        now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
-        await bot.send_message(chat_id=CHAT_ID, text=text)
-        sent_articles.add(url)  # tandai sudah dikirim
-        await asyncio.sleep(1)  # delay supaya tidak spam
+        message = (
+            f"📰 *Berita Emas Terbaru ({now})*\n\n"
+            f"🗞️ *{title_id}*\n"
+            f"{desc_id}\n\n"
+            f"📊 Impact: {percent}%\n"
+            f"📈 Rekomendasi: {action}\n"
+            f"🔗 Sumber: {url}"
+        )
 
-# Main loop (cek terus tiap 30 detik, kirim hanya kalau ada berita baru & relevan)
+        try:
+            await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
+            sent_articles.add(url)
+            print(f"✅ Dikirim: {title[:60]}...")
+        except Exception as e:
+            print("❌ Gagal kirim Telegram:", e)
+
+        await asyncio.sleep(2)
+
+# =======================
+# Loop utama
+# =======================
 async def main():
+    print("🤖 Bot berita XAU/USD aktif dan berjalan...")
     while True:
-        await send_news()
-        await asyncio.sleep(30)
+        try:
+            await send_news()
+        except Exception as e:
+            print("⚠️ Error utama:", e)
+        await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     asyncio.run(main())
