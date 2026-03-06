@@ -21,7 +21,7 @@ from telegram.ext import (
 
 API_KEY_NEWS = os.getenv("API_KEY_NEWS", "c09d91931a424c518822f9b4a997e4c5")
 CHAT_ID = os.getenv("CHAT_ID", "-1002631457012")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 TZ = pytz.timezone("Asia/Jakarta")
