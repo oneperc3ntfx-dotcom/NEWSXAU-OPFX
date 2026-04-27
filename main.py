@@ -19,9 +19,9 @@ from telegram.ext import (
 # CONFIG
 # =======================
 
-API_KEY_NEWS = os.getenv("API_KEY_NEWS", "c09d91931a424c518822f9b4a997e4c5")
+API_KEY_NEWS = os.getenv("API_KEY_NEWS", "YOUR_NEWS_API_KEY")
 CHAT_ID = os.getenv("CHAT_ID", "-1002631457012")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8216938877:AAH7WKn9uJik5Hg3VJ2RIKuzTL7pqv6BIGY")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 TZ = pytz.timezone("Asia/Jakarta")
@@ -29,37 +29,30 @@ TZ = pytz.timezone("Asia/Jakarta")
 sent_articles = set()
 
 # =======================
-# COMMAND /start
+# START COMMAND
 # =======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
 
-    message = (
+    await update.message.reply_text(
         f"👋 Halo {user.first_name}!\n\n"
-        f"🤖 Bot News XAUUSD aktif.\n\n"
-        f"Bot ini akan mengirim berita penting tentang:\n"
-        f"• Gold\n"
-        f"• XAUUSD\n"
-        f"• Ekonomi global\n\n"
-        f"Channel tujuan berita:\n"
-        f"{CHAT_ID}"
+        "🤖 Bot News XAUUSD aktif\n\n"
+        "📊 Mengirim berita ekonomi & gold secara otomatis\n"
+        "📡 Mode: REALTIME NEWS SCANNER"
     )
 
-    await update.message.reply_text(message)
-
 # =======================
-# AMBIL BERITA
+# GET NEWS
 # =======================
 
 def get_news():
 
     try:
-
         url = (
             f"https://newsapi.org/v2/everything?"
-            f"q=gold OR XAUUSD&"
+            f"q=gold OR XAUUSD OR inflation OR federal reserve&"
             f"apiKey={API_KEY_NEWS}&"
             f"pageSize=5&"
             f"sortBy=publishedAt&"
@@ -67,15 +60,12 @@ def get_news():
         )
 
         response = requests.get(url, timeout=15)
-
         data = response.json()
 
         return data.get("articles", [])
 
     except Exception as e:
-
-        print("⚠️ Gagal mengambil berita:", e)
-
+        print("⚠️ Error news:", e)
         return []
 
 # =======================
@@ -84,55 +74,30 @@ def get_news():
 
 def analyze_impact(title, description):
 
-    impact_keywords = {
+    text = f"{title} {description}".lower()
 
-        "high": [
-            "inflation",
-            "interest rate",
-            "federal reserve",
-            "gold rally",
-            "usd strengthens"
-        ],
-
-        "medium": [
-            "gdp",
-            "unemployment",
-            "economic growth"
-        ],
-
-        "low": [
-            "market update",
-            "commodity",
-            "dollar"
-        ]
-
-    }
+    high = ["inflation", "interest rate", "federal reserve", "crisis", "war"]
+    medium = ["gdp", "unemployment", "economic"]
+    low = ["market", "commodity", "dollar"]
 
     score = 0
 
-    text = f"{title} {description}".lower()
+    for w in high:
+        if w in text:
+            score += 3
 
-    for level, keywords in impact_keywords.items():
+    for w in medium:
+        if w in text:
+            score += 2
 
-        for kw in keywords:
+    for w in low:
+        if w in text:
+            score += 1
 
-            if kw in text:
-
-                if level == "high":
-                    score += 3
-
-                elif level == "medium":
-                    score += 2
-
-                else:
-                    score += 1
-
-    percent = min(int(score / 10 * 100), 100)
-
-    return percent
+    return min(int(score / 10 * 100), 100)
 
 # =======================
-# REKOMENDASI SIGNAL
+# RECOMMENDATION
 # =======================
 
 def recommend_action(percent):
@@ -143,66 +108,59 @@ def recommend_action(percent):
     elif percent >= 30:
         return "BUY"
 
-    else:
-        return "HOLD"
+    return "HOLD"
 
 # =======================
-# KIRIM BERITA
+# SEND NEWS
 # =======================
 
-async def send_news(application):
+async def send_news(app):
 
     global sent_articles
 
     articles = get_news()
 
     if not articles:
-
-        print("ℹ️ Tidak ada berita baru")
-
         return
 
-    for article in articles:
+    for a in articles:
 
-        url = article.get("url", "")
-        title = article.get("title", "")
-        desc = article.get("description", "")
+        url = a.get("url", "")
+        title = a.get("title", "")
+        desc = a.get("description", "")
 
         if not url or url in sent_articles:
             continue
 
-        percent = analyze_impact(title, desc)
+        impact = analyze_impact(title, desc)
 
-        if percent == 0:
+        if impact == 0:
             continue
 
+        # translate
         try:
-
             title_id = GoogleTranslator(source="auto", target="id").translate(title or "")
             desc_id = GoogleTranslator(source="auto", target="id").translate(desc or "")
-
-        except Exception:
-
+        except:
             title_id = title
             desc_id = desc
 
-        action = recommend_action(percent)
+        action = recommend_action(impact)
 
         now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
         message = (
-            f"📰 *Berita Emas Terbaru*\n"
+            f"📰 *XAUUSD NEWS UPDATE*\n"
             f"🕒 {now} WIB\n\n"
-            f"🗞️ *{title_id}*\n\n"
+            f"📌 *{title_id}*\n\n"
             f"{desc_id}\n\n"
-            f"📊 Impact: *{percent}%*\n"
-            f"📈 Rekomendasi: *{action}*\n\n"
-            f"🔗 {url}"
+            f"📊 Impact Score: {impact}%\n"
+            f"📈 Signal Bias: {action}\n\n"
+            f"🔗 Source: {url}"
         )
 
         try:
-
-            await application.bot.send_message(
+            await app.bot.send_message(
                 chat_id=CHAT_ID,
                 text=message,
                 parse_mode="Markdown"
@@ -210,33 +168,39 @@ async def send_news(application):
 
             sent_articles.add(url)
 
-            print("✅ Berita dikirim:", title[:50])
+            print("✅ Sent:", title[:50])
 
         except Exception as e:
-
-            print("❌ Gagal kirim:", e)
+            print("❌ Send error:", e)
 
         await asyncio.sleep(2)
 
 # =======================
-# LOOP BOT
+# LOOP
 # =======================
 
-async def news_loop(application):
+async def news_loop(app):
 
-    print("🤖 Bot berita XAUUSD aktif")
+    print("🚀 News system started")
 
     while True:
-
         try:
-
-            await send_news(application)
-
+            await send_news(app)
         except Exception as e:
-
-            print("⚠️ Error:", e)
+            print("⚠️ Loop error:", e)
 
         await asyncio.sleep(CHECK_INTERVAL)
+
+# =======================
+# POST INIT (FIXED)
+# =======================
+
+async def post_init(app):
+
+    loop = asyncio.get_running_loop()
+    loop.create_task(news_loop(app))
+
+    print("✅ Background task running safely")
 
 # =======================
 # MAIN
@@ -248,20 +212,12 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
 
-    async def post_init(application):
-
-        application.create_task(news_loop(application))
-
-        print("🚀 Background news loop started")
-
     app.post_init = post_init
 
-    print("✅ Bot Telegram berjalan")
-
-    app.run_polling()
+    print("🤖 Bot running...")
+    app.run_polling(drop_pending_updates=True)
 
 # =======================
 
 if __name__ == "__main__":
-
     main()
