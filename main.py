@@ -16,13 +16,23 @@ from telegram.ext import (
 )
 
 # =======================
-# CONFIG
+# ENV CONFIG (FIXED SAFE)
 # =======================
 
-API_KEY_NEWS = os.getenv("API_KEY_NEWS", "YOUR_NEWS_API_KEY")
-CHAT_ID = os.getenv("CHAT_ID", "-1002631457012")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+API_KEY_NEWS = os.getenv("API_KEY_NEWS")
+CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+THREAD_ID = os.getenv("THREAD_ID")
+
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
+
+if not API_KEY_NEWS or not CHAT_ID or not BOT_TOKEN:
+    raise ValueError("Missing required ENV: API_KEY_NEWS / CHAT_ID / BOT_TOKEN")
+
+CHAT_ID = int(CHAT_ID)
+
+# THREAD optional (biar tidak crash kalau belum dipakai)
+THREAD_ID = int(THREAD_ID) if THREAD_ID else None
 
 TZ = pytz.timezone("Asia/Jakarta")
 
@@ -38,9 +48,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"👋 Halo {user.first_name}!\n\n"
-        "🤖 Bot News XAUUSD aktif\n\n"
-        "📊 Mengirim berita ekonomi & gold secara otomatis\n"
-        "📡 Mode: REALTIME NEWS SCANNER"
+        "🤖 Bot News XAUUSD aktif\n"
+        "📊 Auto News + Signal Bias\n"
     )
 
 # =======================
@@ -59,24 +68,22 @@ def get_news():
             f"language=en"
         )
 
-        response = requests.get(url, timeout=15)
-        data = response.json()
-
-        return data.get("articles", [])
+        r = requests.get(url, timeout=15)
+        return r.json().get("articles", [])
 
     except Exception as e:
-        print("⚠️ Error news:", e)
+        print("News error:", e)
         return []
 
 # =======================
-# ANALISA IMPACT
+# ANALYSIS
 # =======================
 
 def analyze_impact(title, description):
 
     text = f"{title} {description}".lower()
 
-    high = ["inflation", "interest rate", "federal reserve", "crisis", "war"]
+    high = ["inflation", "interest rate", "federal reserve", "war", "crisis"]
     medium = ["gdp", "unemployment", "economic"]
     low = ["market", "commodity", "dollar"]
 
@@ -97,18 +104,33 @@ def analyze_impact(title, description):
     return min(int(score / 10 * 100), 100)
 
 # =======================
-# RECOMMENDATION
+# SIGNAL
 # =======================
 
-def recommend_action(percent):
+def recommend_action(score):
 
-    if percent >= 60:
+    if score >= 60:
         return "SELL"
-
-    elif percent >= 30:
+    elif score >= 30:
         return "BUY"
-
     return "HOLD"
+
+# =======================
+# SEND MESSAGE (FIXED TOPIC SUPPORT)
+# =======================
+
+async def send_message(app, text):
+
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+
+    if THREAD_ID:
+        payload["message_thread_id"] = THREAD_ID
+
+    await app.bot.send_message(**payload)
 
 # =======================
 # SEND NEWS
@@ -120,12 +142,9 @@ async def send_news(app):
 
     articles = get_news()
 
-    if not articles:
-        return
-
     for a in articles:
 
-        url = a.get("url", "")
+        url = a.get("url")
         title = a.get("title", "")
         desc = a.get("description", "")
 
@@ -133,11 +152,9 @@ async def send_news(app):
             continue
 
         impact = analyze_impact(title, desc)
-
         if impact == 0:
             continue
 
-        # translate
         try:
             title_id = GoogleTranslator(source="auto", target="id").translate(title or "")
             desc_id = GoogleTranslator(source="auto", target="id").translate(desc or "")
@@ -154,24 +171,18 @@ async def send_news(app):
             f"🕒 {now} WIB\n\n"
             f"📌 *{title_id}*\n\n"
             f"{desc_id}\n\n"
-            f"📊 Impact Score: {impact}%\n"
-            f"📈 Signal Bias: {action}\n\n"
-            f"🔗 Source: {url}"
+            f"📊 Impact: {impact}%\n"
+            f"📈 Bias: {action}\n\n"
+            f"🔗 {url}"
         )
 
         try:
-            await app.bot.send_message(
-                chat_id=CHAT_ID,
-                text=message,
-                parse_mode="Markdown"
-            )
-
+            await send_message(app, message)
             sent_articles.add(url)
-
-            print("✅ Sent:", title[:50])
+            print("Sent:", title[:40])
 
         except Exception as e:
-            print("❌ Send error:", e)
+            print("Send error:", e)
 
         await asyncio.sleep(2)
 
@@ -181,26 +192,19 @@ async def send_news(app):
 
 async def news_loop(app):
 
-    print("🚀 News system started")
+    print("🚀 News bot running...")
 
     while True:
-        try:
-            await send_news(app)
-        except Exception as e:
-            print("⚠️ Loop error:", e)
-
+        await send_news(app)
         await asyncio.sleep(CHECK_INTERVAL)
 
 # =======================
-# POST INIT (FIXED)
+# POST INIT
 # =======================
 
 async def post_init(app):
-
-    loop = asyncio.get_running_loop()
-    loop.create_task(news_loop(app))
-
-    print("✅ Background task running safely")
+    asyncio.create_task(news_loop(app))
+    print("✅ Background task started")
 
 # =======================
 # MAIN
@@ -214,10 +218,8 @@ def main():
 
     app.post_init = post_init
 
-    print("🤖 Bot running...")
+    print("🤖 Bot Running...")
     app.run_polling(drop_pending_updates=True)
-
-# =======================
 
 if __name__ == "__main__":
     main()
