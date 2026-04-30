@@ -3,7 +3,7 @@
 import os
 import asyncio
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 from deep_translator import GoogleTranslator
@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # =======================
-# ENV CONFIG (FIXED SAFE)
+# ENV
 # =======================
 
 API_KEY_NEWS = os.getenv("API_KEY_NEWS")
@@ -27,29 +27,27 @@ THREAD_ID = os.getenv("THREAD_ID")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 if not API_KEY_NEWS or not CHAT_ID or not BOT_TOKEN:
-    raise ValueError("Missing required ENV: API_KEY_NEWS / CHAT_ID / BOT_TOKEN")
+    raise ValueError("Missing ENV")
 
 CHAT_ID = int(CHAT_ID)
-
-# THREAD optional (biar tidak crash kalau belum dipakai)
 THREAD_ID = int(THREAD_ID) if THREAD_ID else None
 
 TZ = pytz.timezone("Asia/Jakarta")
 
 sent_articles = set()
 
+# 🔥 NEW: global cooldown
+last_sent_time = None
+COOLDOWN = timedelta(hours=1)
+
 # =======================
-# START COMMAND
+# START
 # =======================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = update.effective_user
-
     await update.message.reply_text(
-        f"👋 Halo {user.first_name}!\n\n"
         "🤖 Bot News XAUUSD aktif\n"
-        "📊 Auto News + Signal Bias\n"
+        "⏱ Kirim berita setiap 1 jam sekali"
     )
 
 # =======================
@@ -57,7 +55,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =======================
 
 def get_news():
-
     try:
         url = (
             f"https://newsapi.org/v2/everything?"
@@ -108,7 +105,6 @@ def analyze_impact(title, description):
 # =======================
 
 def recommend_action(score):
-
     if score >= 60:
         return "SELL"
     elif score >= 30:
@@ -116,7 +112,7 @@ def recommend_action(score):
     return "HOLD"
 
 # =======================
-# SEND MESSAGE (FIXED TOPIC SUPPORT)
+# SEND MESSAGE
 # =======================
 
 async def send_message(app, text):
@@ -133,14 +129,23 @@ async def send_message(app, text):
     await app.bot.send_message(**payload)
 
 # =======================
-# SEND NEWS
+# NEWS SENDER (FIXED COOLDOWN)
 # =======================
 
 async def send_news(app):
 
-    global sent_articles
+    global sent_articles, last_sent_time
+
+    now = datetime.now(TZ)
+
+    # 🔥 BLOCK: 1 jam rule
+    if last_sent_time and (now - last_sent_time) < COOLDOWN:
+        print("⏳ Cooldown active, skip send")
+        return
 
     articles = get_news()
+
+    sent_any = False
 
     for a in articles:
 
@@ -164,11 +169,11 @@ async def send_news(app):
 
         action = recommend_action(impact)
 
-        now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         message = (
             f"📰 *XAUUSD NEWS UPDATE*\n"
-            f"🕒 {now} WIB\n\n"
+            f"🕒 {now_str} WIB\n\n"
             f"📌 *{title_id}*\n\n"
             f"{desc_id}\n\n"
             f"📊 Impact: {impact}%\n"
@@ -179,12 +184,17 @@ async def send_news(app):
         try:
             await send_message(app, message)
             sent_articles.add(url)
+            sent_any = True
             print("Sent:", title[:40])
 
         except Exception as e:
             print("Send error:", e)
 
         await asyncio.sleep(2)
+
+    # 🔥 update cooldown only if sent
+    if sent_any:
+        last_sent_time = now
 
 # =======================
 # LOOP
@@ -199,7 +209,7 @@ async def news_loop(app):
         await asyncio.sleep(CHECK_INTERVAL)
 
 # =======================
-# POST INIT
+# INIT
 # =======================
 
 async def post_init(app):
