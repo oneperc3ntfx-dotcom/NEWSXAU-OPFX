@@ -27,16 +27,14 @@ THREAD_ID = os.getenv("THREAD_ID")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))
 
 if not API_KEY_NEWS or not CHAT_ID or not BOT_TOKEN:
-    raise ValueError("Missing ENV")
+    raise ValueError("Missing ENV variables")
 
 CHAT_ID = int(CHAT_ID)
-THREAD_ID = int(THREAD_ID) if THREAD_ID else None
+THREAD_ID = int(THREAD_ID) if THREAD_ID and THREAD_ID.isdigit() else None
 
 TZ = pytz.timezone("Asia/Jakarta")
 
 sent_articles = set()
-
-# 🔥 NEW: global cooldown
 last_sent_time = None
 COOLDOWN = timedelta(hours=1)
 
@@ -46,12 +44,11 @@ COOLDOWN = timedelta(hours=1)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Bot News XAUUSD aktif\n"
-        "⏱ Kirim berita setiap 1 jam sekali"
+        "🤖 Bot News XAUUSD AKTIF\n⏱ Update setiap 1 jam"
     )
 
 # =======================
-# GET NEWS
+# NEWS
 # =======================
 
 def get_news():
@@ -60,12 +57,10 @@ def get_news():
             f"https://newsapi.org/v2/everything?"
             f"q=gold OR XAUUSD OR inflation OR federal reserve&"
             f"apiKey={API_KEY_NEWS}&"
-            f"pageSize=5&"
-            f"sortBy=publishedAt&"
-            f"language=en"
+            f"pageSize=5&sortBy=publishedAt&language=en"
         )
 
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=10)
         return r.json().get("articles", [])
 
     except Exception as e:
@@ -76,9 +71,9 @@ def get_news():
 # ANALYSIS
 # =======================
 
-def analyze_impact(title, description):
+def analyze_impact(text):
 
-    text = f"{title} {description}".lower()
+    text = text.lower()
 
     high = ["inflation", "interest rate", "federal reserve", "war", "crisis"]
     medium = ["gdp", "unemployment", "economic"]
@@ -101,7 +96,7 @@ def analyze_impact(title, description):
     return min(int(score / 10 * 100), 100)
 
 # =======================
-# SIGNAL
+# ACTION
 # =======================
 
 def recommend_action(score):
@@ -117,30 +112,30 @@ def recommend_action(score):
 
 async def send_message(app, text):
 
-    payload = {
+    data = {
         "chat_id": CHAT_ID,
         "text": text,
         "parse_mode": "Markdown"
     }
 
     if THREAD_ID:
-        payload["message_thread_id"] = THREAD_ID
+        data["message_thread_id"] = THREAD_ID
 
-    await app.bot.send_message(**payload)
+    await app.bot.send_message(**data)
 
 # =======================
-# NEWS SENDER (FIXED COOLDOWN)
+# NEWS LOOP
 # =======================
 
 async def send_news(app):
 
-    global sent_articles, last_sent_time
+    global last_sent_time, sent_articles
 
     now = datetime.now(TZ)
 
-    # 🔥 BLOCK: 1 jam rule
+    # cooldown check
     if last_sent_time and (now - last_sent_time) < COOLDOWN:
-        print("⏳ Cooldown active, skip send")
+        print("⏳ Cooldown active")
         return
 
     articles = get_news()
@@ -156,35 +151,39 @@ async def send_news(app):
         if not url or url in sent_articles:
             continue
 
-        impact = analyze_impact(title, desc)
+        impact = analyze_impact(title + " " + desc)
         if impact == 0:
             continue
 
+        # safe translate
         try:
-            title_id = GoogleTranslator(source="auto", target="id").translate(title or "")
-            desc_id = GoogleTranslator(source="auto", target="id").translate(desc or "")
+            title_id = GoogleTranslator(source="auto", target="id").translate(title)
+            desc_id = GoogleTranslator(source="auto", target="id").translate(desc)
         except:
             title_id = title
             desc_id = desc
 
         action = recommend_action(impact)
 
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        message = f"""
+📰 XAUUSD NEWS
 
-        message = (
-            f"📰 *XAUUSD NEWS UPDATE*\n"
-            f"🕒 {now_str} WIB\n\n"
-            f"📌 *{title_id}*\n\n"
-            f"{desc_id}\n\n"
-            f"📊 Impact: {impact}%\n"
-            f"📈 Bias: {action}\n\n"
-            f"🔗 {url}"
-        )
+📌 {title_id}
+
+{desc_id}
+
+📊 Impact: {impact}%
+📈 Bias: {action}
+
+🔗 {url}
+"""
 
         try:
             await send_message(app, message)
+
             sent_articles.add(url)
             sent_any = True
+
             print("Sent:", title[:40])
 
         except Exception as e:
@@ -192,7 +191,6 @@ async def send_news(app):
 
         await asyncio.sleep(2)
 
-    # 🔥 update cooldown only if sent
     if sent_any:
         last_sent_time = now
 
@@ -200,20 +198,19 @@ async def send_news(app):
 # LOOP
 # =======================
 
-async def news_loop(app):
-
-    print("🚀 News bot running...")
+async def loop(app):
+    print("🚀 Bot News Running...")
 
     while True:
         await send_news(app)
         await asyncio.sleep(CHECK_INTERVAL)
 
 # =======================
-# INIT
+# POST INIT
 # =======================
 
 async def post_init(app):
-    asyncio.create_task(news_loop(app))
+    asyncio.create_task(loop(app))
     print("✅ Background task started")
 
 # =======================
@@ -228,7 +225,8 @@ def main():
 
     app.post_init = post_init
 
-    print("🤖 Bot Running...")
+    print("🤖 BOT RUNNING...")
+
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
